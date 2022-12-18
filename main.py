@@ -253,7 +253,12 @@ def get_cash_management_tab(request_json):
             (data.date>=request_json['from']) & 
             (data.date<=request_json['until'])
         ].sort_values(by=['date']).reset_index(drop=True).to_dict('records')
-        res['nextFulfillDates'] = fake_dates()    
+        res['nextFulfillDates'] = fetch_data.fetch_data_df(f'''
+            SELECT date, amnt
+            FROM `atms_ai_models.next_refill_dates`
+            WHERE atmId = {request_json["atmId"]}
+            ORDER BY date ASC;
+        ''').to_dict('records')   
         res['metadata'] = {
             'remainingAmntLive': roundup(get_remaining(data, atm_capacity)), 
             'nextFulfillDate': res['nextFulfillDates'][0]
@@ -271,11 +276,39 @@ def init_filters():
 
 
 def get_exepnocash(request_json): 
+    atm_capacity = 100000
+    data = pd.read_csv('./data/fulfill_atms.csv')
     atms_positions = fetch_data.fetch_data_df(f'''
         SELECT * 
         FROM `atms_ai_models.trained_atms_v2`;
     ''')
-    atms_positions['remainingAmntLive'] = atms_positions['atmId'].map(lambda x: roundup(randint(1500, 8000)))
+    next_refill_dates_df = fetch_data.fetch_data_df(f'''
+        SELECT * 
+        FROM `atms_ai_models.next_refill_dates`
+        ORDER BY atmId, date ASC;
+    ''').groupby(['atmId']).agg({
+        'date': 'first', 
+        'amnt': 'first'
+    }).reset_index()
+
+    results = pd.DataFrame()
+    for i, row in atms_positions.iterrows(): 
+        tmp = data[data.atmId == row.atmId].reset_index(drop=True)
+        row['remainingAmntLive'] = roundup(get_remaining(tmp, atm_capacity))
+        results = results.append(row, ignore_index=True)
+
+    next_refill_dates_df['atmId'] = next_refill_dates_df['atmId'].astype(int)
+    results['atmId'] = results['atmId'].astype(int)
+
+    results = pd.merge(results, next_refill_dates_df, on=['atmId'], how='left')
+    results = results.rename(columns={
+        'date': 'etimatedDate',
+        'amnt': 'estimatedAmnt'
+    })
+    # print(results)
+    
+
+    # atms_positions['remainingAmntLive'] = roundup(get_remaining(data, atm_capacity)) # atms_positions['atmId'].map(lambda x: roundup(randint(1500, 8000)))
     # atm_capacity = 100000
     # data = pd.read_csv('./data/fulfill_atms.csv')
     # result = pd.DataFrame()
@@ -283,7 +316,8 @@ def get_exepnocash(request_json):
     #     # data = data[data.atmId == int(row['atmId'])].reset_index(drop=True)
     #     row['remainingAmntLive'] = roundup(randint(1500, 8000)) # roundup(get_remaining(data, atm_capacity))
     #     result = result.append(row, ignore_index=True)
-    return atms_positions.to_dict('records')
+    print(results.columns)
+    return results.to_dict('records')
 
 
 @functions_framework.http

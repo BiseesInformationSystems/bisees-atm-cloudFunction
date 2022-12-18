@@ -1,0 +1,1 @@
+gcloud functions deploy bisees-dashboard --entry-point=get_data --runtime=python37 --trigger-http --allow-unauthenticated --memory=4096MB --timeout=500
